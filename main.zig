@@ -19,7 +19,10 @@ pub fn main() !void {
 
   const tokens = try lib.tokenize(mep, heap.page_allocator);
 
-  const tree = try lib.compaction(tokens, heap.page_allocator);
+  for (tokens, 0..tokens.len) |tkn, i| {
+    _ = i;
+    print("{any}\n", .{tkn});
+  }
 
-  print("{any}\n", .{tree});
+  // print("{any}\n", .{tokens});
 }
