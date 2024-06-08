@@ -64,7 +64,7 @@ pub fn tokenize(data:[]u8, alloc:Allocator) ![]Token {
             ib = false;
             res = .identifier;
           }
-          try tokens.append(Token.init(.literal, res, str));
+          try tokens.append(Token.init(.unknown, res, str));
           continue;
         }
 
@@ -87,8 +87,10 @@ pub fn tokenize(data:[]u8, alloc:Allocator) ![]Token {
       33...47, 58, 60...64, 91...96, 123...126 => {
         if (ib == true or nb == true) {
           const str = try whole.toOwnedSlice();
+          const res:Token.subTypes = if (ib) .identifier else .number;
           ib = false;
-          try tokens.append(Token.init(.literal, .number, str));
+          nb = false;
+          try tokens.append(Token.init(.literal, res, str));
         }
 
         if (!ib) ib = true;
@@ -117,7 +119,7 @@ pub fn slurp(path:anytype, alloc:Allocator) ![]u8 {
     .mode = .read_only
   });
   defer File.close(f);
-
-  const m = try File.readToEndAlloc(f, alloc, 2048);
+  const stat = try File.stat(f);
+  const m = try File.readToEndAlloc(f, alloc, @as(usize, stat.size));
   return m;
 }
