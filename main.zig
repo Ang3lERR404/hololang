@@ -21,7 +21,12 @@ pub fn main() !void {
 
   for (tokens, 0..tokens.len) |tkn, i| {
     _ = i;
-    print("{any}\n", .{tkn});
+    print("Type:{any}\nSub-Type:{any}\nContent: '{?s}'\n\n", .{
+      tkn.type,
+      tkn.subType,
+      tkn.content
+    });
+    // print("{any}\n", .{tkn});
   }
 
   // print("{any}\n", .{tokens});

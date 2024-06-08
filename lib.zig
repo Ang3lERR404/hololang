@@ -39,33 +39,68 @@ pub fn tokenize(data:[]u8, alloc:Allocator) ![]Token {
   var ib = false;
   while (i < data.len) : (i += 1) {
     const cs = data[i];
+    var pa:u8 = undefined;
+    var paS:[]u8 = undefined;
+    var fu:u8 = undefined;
+    var fuS:[]u8 = undefined;
+    if (i != 0) {
+      pa = data[i-1];
+      paS = data[0..i-1];
+    }
+    if (i != (data.len - 1)) {
+      fu = data[i+1];
+      fuS = data[i+1..data.len-1];
+    }
 
     switch (cs) {
       ' ', '\n', '\r', ';' => |ch| {
         if ((ch == ' ' or ch == ';') and (nb == true or ib == true)) {
           const str = try whole.toOwnedSlice();
-          if (nb) nb = false else ib = false;
-          try tokens.append(Token.init(.literal, .number, str));
+          var res:Token.subTypes = undefined;
+          if (nb) {
+            nb = false;
+            res = .number;
+          } else {
+            ib = false;
+            res = .identifier;
+          }
+          try tokens.append(Token.init(.literal, res, str));
           continue;
         }
 
-        if ((ch == '\r' and data[i+1] == '\n') or ch == '\n') {
+        if ((ch == '\r' and fu == '\n') or ch == '\n') {
           try tokens.append(Token.init(.whitespace, .newline, null));
           continue;
         }
         continue;
       },
       48...57 => {
+        if (pa == ':') {
+          const str = try whole.toOwnedSlice();
+          ib = false;
+          try tokens.append(Token.init(.symbol, .unknown, str));
+        }
         if (!nb) nb = true;
         try whole.append(cs);
         continue;
       },
-      33...47, 58, 60...64, 91...96, 123...126  => {
+      33...47, 58, 60...64, 91...96, 123...126 => {
+        if (ib == true or nb == true) {
+          const str = try whole.toOwnedSlice();
+          ib = false;
+          try tokens.append(Token.init(.literal, .number, str));
+        }
+
         if (!ib) ib = true;
         try whole.append(cs);
         continue;
       },
       97...122, 65...90 => {
+        if (pa == ':') {
+          const str = try whole.toOwnedSlice();
+          ib = false;
+          try tokens.append(Token.init(.symbol, .unknown, str));
+        }
         if (!ib) ib = true;
         try whole.append(cs);
         continue;
