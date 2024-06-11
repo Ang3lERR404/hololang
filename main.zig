@@ -26,8 +26,5 @@ pub fn main() !void {
       tkn.subType,
       tkn.content
     });
-    // print("{any}\n", .{tkn});
   }
-
-  // print("{any}\n", .{tokens});
 }
