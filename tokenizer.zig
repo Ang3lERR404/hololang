@@ -1,72 +1,69 @@
 const llib = @import("llib.zig");
 const std = llib.std;
-const This = @This();
 const str:type = [:0]const u8;
+const print = llib.print;
 
-/// a string, or "buffer" if you will.
-buffer:str,
+const Tokares = llib.tokares;
 
-/// Index
-i:usize,
+pub const Tokens:type = std.ArrayList(Tokares);
 
-/// Pending Erronious Token
-pEToken:?llib.token,
-
-pub fn init (buffer:str) This {
-  const start:usize = if (llib.sW(u8, buffer, "\xEF\xBB\xBF")) 3 else 0;
-  return This{
-    .buffer = buffer,
-    .i = start,
-    .pEToken = null
+pub fn itr (buff:str, cat:std.mem.Allocator) !?Tokens {
+  @setEvalBranchQuota(10000);
+  var res:Tokares = .{
+    .state = .start,
+    .tag = .unknown,
+    .region = try cat.alloc(usize, 2),
+    .lcol = try cat.alloc(usize, 2),
   };
-}
+  defer {
+    cat.free(res.region);
+    cat.free(res.lcol);
+  }
 
-pub const Tokens:type = llib.std.ArrayList(llib.tokares);
+  res.region[0] = 0; res.region[1] = 0;
+  res.lcol[0] = 0; res.lcol[1] = 0;
 
-pub fn itr (this:*This) ?Tokens {
-  var tokares:llib.tokares = .{
-    .column = 0,
-    .line = 0,
-    .result = .{
-      .tag = .EOF,
-      .loc = .{
-        .s = this.i,
-        .e = undefined
-      },
-    },
-    .state = .unknown
-  };
-  // var tokens = Tokens.init(std.heap.page_allocator);
+  var i:usize = if (std.mem.startsWith(u8, buff, "\xEF\xBB\xBF")) 3 else 0;
+  var tokens = Tokens.init(cat);
+  defer tokens.deinit();
 
-  while (this.i < this.buffer.len) : (this.i += 1) {
-    const ch = this.buffer[this.i];
-    const T = @TypeOf(ch);
-    const TInfo = @typeInfo(T);
+  while (i < buff.len) : (i += 1) {
+    const ch = buff[i];
+
     switch (ch) {
       ' ', '\t', '\r' => {
-        tokares.column += 1;
-        tokares.result.loc.s = this.i + 1;
-      },
-      '\n' => {
-        tokares.column = 0;
-        tokares.line += 1;
-      },
-      'a'...'z', 'A'...'Z', '0'...'9' => {
-        tokares.column += 1;
-        tokares.result = .{ .tag = .identifier };
-        tokares.state = .unknown;
-      },
-      '@', '$' => {
-        if (TInfo == .Null) continue;
+        res.lcol[0] += 1;
+        res.region[0] = i + 1;
+      }, '\n' => {
+        res.lcol[0] = 0;
+        res.lcol[1] += 1;
+        res.region[0] = i + 1;
+        res.state = .newline;
+
+        try tokens.append(res);
+      }, else => {
+        if (i % 9 == 8) print("\n", .{});
+        res.lcol[0] += 1;
+        print("'{c}' = {any}, ", .{ch, ch});
       }
     }
+
+    if (i == buff.len - 1) {
+      res.state = .EOF;
+      try tokens.append(res);
+      break;
+    }
   }
+
+  print("{any}", .{try tokens.toOwnedSlice()});
+
   return null;
 }
 
 test "general" {
+  const pageCat = std.heap.page_allocator;
   // language proposal 0.1?
-  var tokenz = This.init(
+  _ = try itr(
     \\$mui<mut>:i = 51+2;
     \\@for<!mut>{expr<2>:2;stmt<1>:3} sct1:(expr); sct2:{stmt}; <{
     \\  ~`!@#$%^&*()-_=+123456789
@@ -83,6 +80,5 @@ test "general" {
     \\  }
     \\}
     \\print($mui);
-  );
-  tokenz.itr();
+  , pageCat);
 }
