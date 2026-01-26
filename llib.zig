@@ -1,6 +1,8 @@
 pub const std = @import("std");
-pub const tokares = @import("./tokares.zig");
-pub const tokenizer = @import("./tokenizer.zig");
+pub const token = @import("token.zig");
+// pub const tokares = @import("./tokares.zig");
+pub const tokenizer = @import("tokenizer.zig");
+pub const string = @import("string.zig");
 
 pub const print = std.debug.print;
 pub const assert = std.debug.assert;
