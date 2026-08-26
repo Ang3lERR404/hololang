@@ -1,7 +1,15 @@
-56 + 57;
-
-var Muro:type = 6;
-
-fn moro(marko, polo) error!void {
-
+$mui<mut>:i = 51+2;
+@for<!mut>{expr<2>:2;stmt<1>:3} sct1:(expr); sct2:{stmt}; <{all}>
+@print<!mut> ($zesh<mut>:anytype) {
+  $zesh = <:-codes-:>;
+  $i<mut>:usize = 0;
+  for ($i < $zesh.len) {
+    $code = $zesh[i];
+    <!-
+      mov ah, 0x0E
+      mov al, <!>code
+      int 0x10
+    -!>
+  }
 }
+print($mui);

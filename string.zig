@@ -45,10 +45,6 @@ pub fn clear (this:*This, s:usize, e:usize) void {
     this.buff.?[i] = 0;
 }
 
-pub fn clearAll(this:*This) void {
-  this.clear(0, this.len);
-}
-
 pub fn alloc(this:*This, comptime size:usize) errors!void {
   const oL = this.len;
   if (this.len > 0) {
@@ -56,6 +52,7 @@ pub fn alloc(this:*This, comptime size:usize) errors!void {
     this.buff.? = this.cat.realloc(this.buff.?, size) catch return errors.AllocateFailure;
     this.clear(oL, this.buff.?.len);
     this.len = this.buff.?.len;
+    return;
   }
   this.buff.? = this.cat.alloc(u8, size) catch return errors.AllocateFailure;
   this.len = this.buff.?.len;
@@ -91,8 +88,11 @@ pub fn truncate (this:*This) !void {
   try this.alloc(this.len);
 }
 
-pub fn eql(this:*This, str:anytype) bool {
-  return mem.eql(u8, this.buff.?, str);
+pub fn eql(this:*This, str:anytype, comptime rI:bool) if (rI) ?usize else bool {
+  return if (rI == true) 
+    mem.indexOfDiff(u8, this.buff.?, str)
+  else
+    mem.eql(u8, this.buff.?, str);
 }
 
 pub fn toStr(this:*This) []const u8 {
@@ -180,7 +180,7 @@ pub fn find(this:*This, litrl:[]const u8, revr:bool) ?usize {
       mem.indexOf(u8, buff[0..this.len], litrl)
     else
       mem.lastIndexOf(u8, buff[0..this.len], litrl);
-    
+
     if (ind) |i|
       return This.getIndex(buff, i, false);
   }
@@ -211,6 +211,7 @@ pub fn trim(this:*This, whitelist:[]const u8) void {
     if (This.getIndex(buff, i, false)) |k|
       this.remRange(0, k) catch {};
   }
+  
 }
 
 fn inWhitelist(char:u8, whitelist:[]const u8) bool {
@@ -235,8 +236,40 @@ pub fn assumeWriteFrom(this:*This, str:anytype, s:usize) !void {
 }
 
 const fmt = std.fmt;
+
 pub fn f(this:*This, comptime fmStr:[]const u8, args:anytype) errors!void {
   this.origBuff = this.own();
   this.buff.? = try fmt.allocPrint(this.cat, fmStr, args) catch return errors.FormattingFailure;
-  return this;
+}
+
+pub fn subStr(this:*This, from:usize, to:usize) *This {
+  if (this.buff) |b| {
+    return initWD(this.*.cat, b[from..to]);
+  }
+}
+
+pub fn append(this:*This, str:anytype) void {
+  var i:usize = 0;
+  if (this.buff) |b| {
+    while (i < this.len) : (i += 1) {
+      const ch = b[i];
+      if (ch != 0) continue;
+      break;
+    }
+
+    this.writeFrom(str, i);
+  }
+}
+
+pub fn appendChar(this:*This,ch:anytype) void {
+  var i:usize = 0;
+  if (this.buff) |b| {
+    while (i < this.len) : (i+=1) {
+      const ch0 = b[i];
+      if (ch0 != 0) continue;
+      break;
+    }
+
+    this.writeFrom([1]u8{ch}, i);
+  }
 }

@@ -15,142 +15,156 @@ const Allocat = mem.Allocator;
 pub fn itr(buff:anytype, cat:Allocat) !?Tokens {
   @setEvalBranchQuota(10000);
   var res = Token{
-    .state = .start,
-    .tag = .unknown
+    .tokenType = .Unknown,
+    .literal = undefined,
+    .lineColl = undefined,
+    .literalChar = undefined
   };
+  res.lineColl = .{0, 0};
   var i:usize = if (mem.startsWith(u8, buff, "\xEF\xBB\xBF")) 3 else 0;
-  var tokens = Tokens.init(cat);
-  defer tokens.deinit();
-  var gbuff:string = string.init(cat);
+  var tokens = Tokens.empty;
+
+  var gbuff = string.init(cat);
   defer gbuff.deinit();
 
-  try gbuff.alloc(memAmnt) catch |err|{
-    if (err == string.errors.AllocateFailure) {
-      panic("Failed to allocate {any} memory", .{memAmnt});
-    }
-  };
   while (i < buff.len) : (i += 1) {
     const ch = buff[i];
     switch (ch) {
       ' ', '\t', '\r' => {
-        res.lcol[0] += 1;
-        switch(res.state) {
-          .identifier => {
-            if (res.tag != .identification) continue;
-            res.region[1] = i - 1;
-            try tokens.append(res);
-            gbuff.clearAll();
-            res.state = .unknown;
-            res.tag = .whitespace;
-            res.region[0] = i+1;
-            res.region[1] = i+1;
+        res.lineColl[0]+=1;
+        switch (res.tokenType) {
+          .string => {
+            res.tokenType = .whitespace;
+            res.literalChar = ch;
+            try tokens.append(cat, res);
             continue;
           },
-          .comment, .string => {
-            continue;
-          },
+          // .ident => {
+
+          // },
           else => {
-            res.region[0] = i + 1;
-            gbuff.clearAll();
+            continue;
           }
         }
+        // if (res.tokenType != .string) continue;
+        res.lineColl[0]+=1;
+        res.tokenType = .whitespace;
+        res.literalChar = ch;
+        try tokens.append(cat, res);
+        continue;
       },
       '\n' => {
-        res.lcol[0] = 0;
-        res.lcol[1] += 1;
-        switch(res.state) {
-          .identifier => {
-            res.region[1] = i - 1;
-            try tokens.append(res);
-            gbuff.clearAll();
-          },
-          .comment, .string => {
-            continue;
-          },
-          else => {}
-        }
-        res.region[0] = i + 1;
-        res.region[1] = i + 1;
-        res.state = .newline;
-        res.tag = .whitespace;
-        try tokens.append(res);
-        gbuff.clearAll();
+        if (res.tokenType != .string) continue;
+        res.lineColl[0]=0;
+        res.tokenType = .whitespace;
+        res.literalChar = ch;
+        try tokens.append(cat, res);
+        continue;
       },
       '$' => {
-        res.lcol[0] += 1;
-        // gbuff.assumeWrite([1]u8{ch});
-        switch(res.state) {
+        res.lineColl[0]+=1;
+        switch(res.tokenType) {
           .comment, .string => continue,
           else => {}
         }
-        res.state = .identifier;
-        res.tag = .declaration;
+        res.tokenType = .ident;
+        try tokens.append(cat, res);
       },
-      'a'...'z', 'A'...'Z' => {
-        res.lcol[0] += 1;
-        try gbuff.write([1]u8{ch}, gbuff.len);
-        if (res.state == .comment or res.state == .string) {
-          continue;
-        }
-        if (res.state == .identifier) {
-          res.tag = .identification;
-          res.region[0] = i;
-        }
-        // res.state = .identifier;
-        // res.tag = .
-      },
-      '0'...'9' => {
-        res.lcol[0] += 1;
-        if (res.state == .righthand and res.tag == .expression) {
-          res.state = .expression;
-          res.tag = .unknown;
-        }
-      },
-      '=' => {
-        res.lcol[0] += 1;
-        if (res.state == .identifier and res.tag == .identification) {
-          res.state = .righthand;
-          res.tag = .expression;
+      'a'...'z','A'...'Z' => {
+        res.lineColl[0] += 1;
+        gbuff.appendChar(ch);
+        switch (res.tokenType) {
+          .comment, .string => continue,
+          .ident => {
+            
+          }
         }
       },
       else => {
-        // if (i % 1 == 0) print("\n", .{});
-        res.lcol[0] += 1;
-        res.state = .unknown;
-        res.tag = .unknown;
-        // print("'{c}' = {any}, ", .{ch, ch});
+        print("'{c}' = {any},\n", .{ch, ch});
       }
     }
-    if (i == buff.len - 1) {
-      res.state = .EOF;
-      try tokens.append(res);
-      break;
-    }
+    //
+      // switch (ch) {
+        //   'a'...'z', 'A'...'Z' => {
+        //     res.lcol[0] += 1;
+        //     gbuff.append([1]u8{ch});
+        //     if (res.state == .comment or res.state == .string) {
+        //       continue;
+        //     }
+        //     if (res.state == .identifier and res.tag == .declaration) {
+        //       res.tag = .identification;
+        //       res.region[0] = i;
+        //     }
+        //     if (res.state == .special and res.tag == .opening) {
+        //       res.tag = .mutatable;
+        //       res.region[0] = i;
+        //       if (gbuff.subStr(0, 3).eql("mut", false)) {
+        //         res.region[1] = i;
+        //         try tokens.append(res);
+        //       }
+        //     }
+        //     // res.state = .identifier;
+        //     // res.tag = .
+        //   },
+        //   '0'...'9' => {
+        //     res.lcol[0] += 1;
+        //     if (res.state == .righthand and res.tag == .expression) {
+        //       res.state = .expression;
+        //       res.tag = .unknown;
+        //     }
+        //     if (res.state == .identifier and res.tag == .identification) {
+        //       gbuff.append([1]u8{ch});
+        //     }
+        //   },
+        //   '=' => {
+        //     res.lcol[0] += 1;
+        //     if (res.state == .identifier and res.tag == .identification) {
+        //       res.state = .righthand;
+        //       res.tag = .expression;
+        //     }
+        //   },
+        //   '<' => {
+        //     res.lcol[0] += 1;
+        //     if (res.state == .identifier and res.tag == .identification) {
+        //       res.region[1] = i-1;
+        //       try tokens.append(res);
+        //       gbuff.clear(0, gbuff.len);
+        //     }
+        //     res.state = .special;
+        //     res.tag = .opening;
+        //     try tokens.append(res);
+        //   },
+        //   '>' => {
+        //     res.lcol[0] += 1;
+        //     if (res.state == .special) {
+        //       res.region[1] = i-1;
+        //       try tokens.append(res);
+        //       gbuff.clear(0, gbuff.len);
+        //     }
+        //   },
+        //   else => {
+        //     // if (i % 1 == 0) print("\n", .{});
+        //     res.lcol[0] += 1;
+        //     res.state = .unknown;
+        //     res.tag = .unknown;
+        //     print("'{c}' = {any}, ", .{ch, ch});
+        //   }
+        // }
+    // if (i == buff.len - 1) {
+    //   res.state = .EOF;
+    //   try tokens.append(res);
+    //   break;
+    // }
   }
-  print("{any}", .{try tokens.toOwnedSlice()});
+  // print("\n{any}\n", .{try tokens.toOwnedSlice()});
   return null;
 }
-
-// pub fn itr (buff:str, cat:std.mem.Allocator) !?Tokens {
-//   while (i < buff.len) : (i += 1) {
-//     const ch = buff[i];
-//     if (i == buff.len - 1) {
-//       res.state = .EOF;
-//       try tokens.append(res);
-//       break;
-//     }
-//   }
-
-//   print("{any}", .{try tokens.toOwnedSlice()});
-
-//   return null;
-// }
 
 test "general" {
   const pageCat = std.heap.page_allocator;
   // language proposal 0.1?
-  _ = try itr(
-  \\$mui<mut>:i = 51+2;
+  _ = try itr(\\$mui<mut>:i = 51+2;
   \\@for<!mut>{expr<2>:2;stmt<1>:3} sct1:(expr); sct2:{stmt}; <{all}>
   \\@print<!mut> ($zesh<mut>:anytype) {
   \\  $zesh = <:-codes-:>;
