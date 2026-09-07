@@ -1,183 +1,377 @@
-const llib = @import("llib.zig");
-const std = llib.std;
-const dbg = std.debug;
-const print = llib.print;
-const panic = dbg.panic;
-const Arrlist = std.ArrayList;
-const string = llib.string;
-const memAmnt:usize = 5000;
+const std = @import("std");
 
-const Token = llib.token;
-pub const Tokens:type = Arrlist(Token);
-const mem = std.mem;
-const Allocat = mem.Allocator;
+pub const This = @This();
 
-pub fn itr(buff:anytype, cat:Allocat) !?Tokens {
-  @setEvalBranchQuota(10000);
-  var res = Token{
-    .tokenType = .Unknown,
-    .literal = undefined,
-    .lineColl = undefined,
-    .literalChar = undefined
+tag:Tag,
+loc:Loc,
+comboLayer:usize,
+
+pub const Loc = struct {
+  start:usize,
+  end:usize
+};
+
+pub var keywords = std.StaticStringMap(Tag).initComptime(.{
+  .{"codes", .kwCodes},
+  .{"mut", .kwMutable},
+  .{"expr", .kwExpression},
+  .{"stmt", .kwStatement},
+  .{"sct", .kwSection},
+  .{"all", .kwAll},
+  .{"fn", .kwFunction},
+  .{"anytype", .kwAnytype},
+  .{"type", .kwType},
+  .{"comptime", .kwComptime},
+  .{"test", .kwTest}
+});
+
+pub fn gKeyword(bytes:[]const u8) ?Tag {
+  return keywords.get(bytes);
+}
+
+pub const Tag = enum {
+  //unknown
+    invalid,
+    idt,
+    strLtrl,
+    cLtrl,
+    eof,
+    builtin,
+    combo,
+  // symbols
+    bang,
+    pipe,
+    eql,
+    lParen,
+    rParen,
+    semic,
+    perc,
+    lBrace,
+    rBrace,
+    lBrckt,
+    rBrckt,
+    periodt,
+    elli2,
+    elli3,
+    caret,
+    plus,
+    minus,
+    astr,
+    arrow,
+    colon,
+    slash,
+    comma,
+    amper,
+    abl,
+    abr,
+    tilde,
+    numltrl,
+    docCmt,
+    ctnDocCmt,
+    doll,
+    hash,
+    at,
+    question,
+  // Keywords
+    kwCodes,
+    kwMutable,
+    kwExpression,
+    kwStatement,
+    kwSection,
+    kwAll,
+    kwFunction,
+    kwAnytype,
+    kwType,
+    kwComptime,
+    kwTest,
+  pub fn lexeme(tag:Tag) ?[]const u8 {
+    return switch (tag) {
+      .invalid,
+      .idt,
+      .strLtrl,
+      .cLtrl,
+      .eof,
+      .builtin,
+      .numltrl,
+      .docCmt,
+      .ctnDocCmt,
+      .combo => null,
+
+      .bang => "!",
+      .pipe => "|",
+      .eql => "=",
+      .lParen => "(",
+      .rParen => ")",
+      .semic => ";",
+      .perc => "%",
+      .lBrace => "[",
+      .rBrace => "]",
+      .lBrckt => "{",
+      .rBrckt => "}",
+      .periodt => ".",
+      .elli2 => "..",
+      .elli3 => "...",
+      .caret => "^",
+      .plus => "+",
+      .minus => "-",
+      .astr => "*",
+      .arrow => "->",
+      .colon => ":",
+      .slash => "/",
+      .comma => ",",
+      .amper => "&",
+      .question => "?",
+      .abl => "<",
+      .abr => ">",
+      .tilde => "~",
+      .kwAll => "all",
+      .kwCodes => "codes",
+      .kwExpression => "expr",
+      .kwFunction => "fn",
+      .at => "@",
+      .doll => "$",
+      .hash => "#",
+      .kwMutable => "mut",
+      .kwSection => "sct",
+      .kwStatement => "stmt",
+      .kwAnytype => "anytype",
+      .kwComptime => "comptime",
+      .kwTest => "test",
+      .kwType => "type"
+    };
+  }
+  pub fn symbol(tag:Tag) []const u8 {
+    return tag.lexeme() orelse switch (tag) {
+      .invalid => "Invalid Token",
+      .idt => "An Identifier",
+      .strLtrl => "A String Literal",
+      .cLtrl => "A Char Literal",
+      .eof => "EOF",
+      .builtin => "A Builtin Function",
+      .numltrl => "A Number Literal",
+      .docCmt, .ctnDocCmt => "A Document Comment",
+      else => unreachable
+    };
+  }
+};
+
+pub const Tokenizer = struct {
+  const This1 = @This();
+  buffer:[:0]const u8,
+  idx:usize,
+  pub fn dump(this:*This1, token:*const This) This1 {
+    std.debug.print("{s} \"{s}\"\n", .{@tagName(token.tag), this.buffer{this.buffer[token.loc.start..token.loc.end]}});
+  }
+  pub fn init(buffer:[:0]const u8) This1 {
+    return .{
+      .buffer = buffer,
+      .idx = if (std.mem.startsWith(u8, buffer, "\xEF\xBB\xBF")) 3 else 0
+    };
+  }
+
+  const State = enum {
+    start, expNl, idt, builtin,
+    strltrl, cltrl, backslash,
+    eql, bang, pipe, minus, aster,
+    slash, linecmtS, linecmt, doccmtS, doccmt,
+    int, intExp, intPrd, float, fXponent, amper,
+    caret, perc, plus, anglBL, anglBR, pdt, pdt2, sawAt,
+    invalid, combo
   };
-  res.lineColl = .{0, 0};
-  var i:usize = if (mem.startsWith(u8, buff, "\xEF\xBB\xBF")) 3 else 0;
-  var tokens = Tokens.empty;
 
-  var gbuff = string.init(cat);
-  defer gbuff.deinit();
+  pub fn next(this:*This1) This {
+    var res:This = .{
+      .tag = undefined,
+      .comboLayer = 0,
+      .loc = .{
+        .start = this.idx,
+        .end = this.idx,
+      }
+    };
 
-  while (i < buff.len) : (i += 1) {
-    const ch = buff[i];
-    switch (ch) {
-      ' ', '\t', '\r' => {
-        res.lineColl[0]+=1;
-        switch (res.tokenType) {
-          .string => {
-            res.tokenType = .whitespace;
-            res.literalChar = ch;
-            try tokens.append(cat, res);
-            continue;
+    state: switch (State.start) {
+      .start => switch (this.buffer[this.idx]) {
+        0 => {
+          if (this.idx == this.buffer.len) {
+            return .{
+              .tag = .eof,
+              .loc = .{
+                .start = this.idx,
+                .end = this.idx
+              }
+            };
+          } else
+            continue :state .invalid;
+        },
+        ' ', '\n', '\t', '\r' => {
+          this.idx += 1;
+          res.loc.start = this.idx;
+          continue :state .start;
+        },
+        '"' => {
+          res.tag = .strLtrl;
+          continue :state .strltrl;
+        },
+        '\'' => {
+          res.tag = .cLtrl;
+          continue :state .cltrl;
+        },
+        'a'...'z', 'A'...'Z', '_' => {
+          res.tag = .idt;
+          continue :state .idt;
+        },
+        '@' => continue :state .sawAt,
+        '=' => continue :state .eql,
+        '!' => continue :state .bang,
+        '|' => continue :state .pipe,
+        '(' => {
+          res.tag = .lParen;
+          this.idx += 1;
+        },
+        ')' => {
+          res.tag = .rParen;
+          this.idx += 1;
+        },
+        '[' => {
+          res.tag = .lBrace;
+          this.idx += 1;
+        },
+        ']' => {
+          res.tag = .rBrace;
+          this.idx += 1;
+        },
+        ';' => {
+          res.tag = .semic;
+          this.idx += 1;
+        },
+        ',' => {
+          res.tag = .comma;
+          this.idx += 1;
+        },
+        '?' => {
+          res.tag = .question;
+          this.idx += 1;
+        },
+        ':' => {
+          res.tag = .colon;
+          this.idx += 1;
+        },
+        '%' => continue :state .perc,
+        '*' => continue :state .aster,
+        '+' => continue :state .plus,
+        '<' => continue :state .anglBL,
+        '>' => continue :state .anglBR,
+        '^' => continue :state .caret,
+        '{' => {
+          res.tag = .lBrace;
+          this.idx += 1;
+        },
+        '}' => {
+          res.tag = .rBrace;
+          this.idx += 1;
+        },
+        '~' => {
+          res.tag = .tilde;
+          this.idx += 1;
+        },
+        '.' => continue :state .pdt,
+        '-' => continue :state .minus,
+        '/' => continue :state .slash,
+        '&' => continue :state .amper,
+        '0'...'9' => {
+          res.tag = .numltrl;
+          this.idx += 1;
+          continue :state .int;
+        },
+        else => continue :state .invalid
+      },
+
+      .expNl => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          0 => {
+            if (this.idx == this.buffer.len)
+              res.tag = .invalid
+            else
+              continue :state .invalid;
           },
-          // .ident => {
+          '\n' => {
+            this.idx += 1;
+            res.loc.start = this.idx;
+            continue :state .start;
+          },
+          else => continue :state .invalid
+        }
+      },
 
-          // },
-          else => {
-            continue;
-          }
-        }
-        // if (res.tokenType != .string) continue;
-        res.lineColl[0]+=1;
-        res.tokenType = .whitespace;
-        res.literalChar = ch;
-        try tokens.append(cat, res);
-        continue;
-      },
-      '\n' => {
-        if (res.tokenType != .string) continue;
-        res.lineColl[0]=0;
-        res.tokenType = .whitespace;
-        res.literalChar = ch;
-        try tokens.append(cat, res);
-        continue;
-      },
-      '$' => {
-        res.lineColl[0]+=1;
-        switch(res.tokenType) {
-          .comment, .string => continue,
-          else => {}
-        }
-        res.tokenType = .ident;
-        try tokens.append(cat, res);
-      },
-      'a'...'z','A'...'Z' => {
-        res.lineColl[0] += 1;
-        gbuff.appendChar(ch);
-        switch (res.tokenType) {
-          .comment, .string => continue,
-          .ident => {
-            
-          }
+      .invalid => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          0 => {if (this.idx == this.buffer.len) res.tag = .invalid else continue :state .invalid;},
+          '\n' => res.tag = .invalid,
+          else => continue :state .invalid
         }
       },
-      else => {
-        print("'{c}' = {any},\n", .{ch, ch});
+
+      .sawAt => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          0, '\n' => res.tag = .invalid,
+          '"' => {
+            res.tag = .idt;
+            continue :state .strltrl;
+          },
+          'a'...'z', 'A'...'Z', '_' => {
+            res.tag = .builtin;
+            continue :state .builtin;
+          },
+          else => continue :state .invalid
+        }
+      },
+
+      .amper => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          '=' => continue :state .combo,
+          else => res.tag = .amper
+        }
+      },
+
+      .aster => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          '=', '*', '%', '|' => continue :state .combo,
+          else => res.tag = .aster
+        }
+      },
+
+      .perc => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          '=' => continue :state .combo,
+          else => res.tag = .perc
+        }
+      },
+
+      .plus => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          '=', '+', '%', '|' => continue :state .combo,
+          else => res.tag = .plus
+        }
+      },
+
+      .caret => {
+        this.idx += 1;
+        switch (this.buffer[this.idx]) {
+          '=' => continue :state .combo,
+          else => res.tag = .caret
+        }
+      },
+
+      .idt => {
+        
       }
     }
-    //
-      // switch (ch) {
-        //   'a'...'z', 'A'...'Z' => {
-        //     res.lcol[0] += 1;
-        //     gbuff.append([1]u8{ch});
-        //     if (res.state == .comment or res.state == .string) {
-        //       continue;
-        //     }
-        //     if (res.state == .identifier and res.tag == .declaration) {
-        //       res.tag = .identification;
-        //       res.region[0] = i;
-        //     }
-        //     if (res.state == .special and res.tag == .opening) {
-        //       res.tag = .mutatable;
-        //       res.region[0] = i;
-        //       if (gbuff.subStr(0, 3).eql("mut", false)) {
-        //         res.region[1] = i;
-        //         try tokens.append(res);
-        //       }
-        //     }
-        //     // res.state = .identifier;
-        //     // res.tag = .
-        //   },
-        //   '0'...'9' => {
-        //     res.lcol[0] += 1;
-        //     if (res.state == .righthand and res.tag == .expression) {
-        //       res.state = .expression;
-        //       res.tag = .unknown;
-        //     }
-        //     if (res.state == .identifier and res.tag == .identification) {
-        //       gbuff.append([1]u8{ch});
-        //     }
-        //   },
-        //   '=' => {
-        //     res.lcol[0] += 1;
-        //     if (res.state == .identifier and res.tag == .identification) {
-        //       res.state = .righthand;
-        //       res.tag = .expression;
-        //     }
-        //   },
-        //   '<' => {
-        //     res.lcol[0] += 1;
-        //     if (res.state == .identifier and res.tag == .identification) {
-        //       res.region[1] = i-1;
-        //       try tokens.append(res);
-        //       gbuff.clear(0, gbuff.len);
-        //     }
-        //     res.state = .special;
-        //     res.tag = .opening;
-        //     try tokens.append(res);
-        //   },
-        //   '>' => {
-        //     res.lcol[0] += 1;
-        //     if (res.state == .special) {
-        //       res.region[1] = i-1;
-        //       try tokens.append(res);
-        //       gbuff.clear(0, gbuff.len);
-        //     }
-        //   },
-        //   else => {
-        //     // if (i % 1 == 0) print("\n", .{});
-        //     res.lcol[0] += 1;
-        //     res.state = .unknown;
-        //     res.tag = .unknown;
-        //     print("'{c}' = {any}, ", .{ch, ch});
-        //   }
-        // }
-    // if (i == buff.len - 1) {
-    //   res.state = .EOF;
-    //   try tokens.append(res);
-    //   break;
-    // }
   }
-  // print("\n{any}\n", .{try tokens.toOwnedSlice()});
-  return null;
-}
-
-test "general" {
-  const pageCat = std.heap.page_allocator;
-  // language proposal 0.1?
-  _ = try itr(\\$mui<mut>:i = 51+2;
-  \\@for<!mut>{expr<2>:2;stmt<1>:3} sct1:(expr); sct2:{stmt}; <{all}>
-  \\@print<!mut> ($zesh<mut>:anytype) {
-  \\  $zesh = <:-codes-:>;
-  \\  $i<mut>:usize = 0;
-  \\  for ($i < $zesh.len) {
-  \\    $code = $zesh[i];
-  \\    <!-
-  \\      mov ah, 0x0E
-  \\      mov al, <!>code
-  \\      int 0x10-!>
-  \\  }
-  \\}
-  \\print($mui);
-  , pageCat);
-  print("\n", .{});
-}
+};
