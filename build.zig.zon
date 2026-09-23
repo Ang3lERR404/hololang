@@ -1,0 +1,12 @@
+.{
+  .name = .Holo,
+  .version = "0.1.0",
+  .minimum_zig_version = "0.16.0",
+  .dependencies = .{},
+  .paths = .{
+    "build.zig",
+    "build.zig.zon",
+    "src"
+  },
+  .fingerprint = 0x282a7bb115a8429f
+}

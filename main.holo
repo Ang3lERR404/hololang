@@ -1,4 +1,4 @@
-$mui<mut>:i = 51+2;
+$mui<mut> = 51+2;
 @for<!mut>{expr<2>:2;stmt<1>:3} sct1:(expr); sct2:{stmt}; <{all}>
 @print<!mut> ($zesh<mut>:anytype) {
   $zesh = <:-codes-:>;
